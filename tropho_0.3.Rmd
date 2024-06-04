@@ -1,0 +1,415 @@
+---
+title: "Trophoblast Single Cell Analysis"
+author: "Syed"
+date: "19/01/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Uploading Libraries 
+```{r cars, include=FALSE}
+library(sceasy)
+library(reticulate)
+#use_condaenv('EnvironmentName')
+library(gplots)
+library(Seurat)
+library(RColorBrewer)
+library(stringr)
+library(dplyr)
+library(Matrix)
+library(cowplot)
+library(scatterplot3d)
+library(plotrix)
+library(pals)
+colors = coolwarm(12)
+```
+
+## Reading in 10x Genomics Data
+
+```{r pressure, echo=FALSE, include=FALSE}
+set.seed(2702)
+htsc.h9.data.1 <- Read10X(data.dir = "/Users/shahzaib/Documents/refined_images/Downloads/data/H9", gene.column = 2, unique.features = TRUE)
+htsc.ccr7.data.1 <- Read10X(data.dir = "/Users/shahzaib/Documents/CCR7KO_H9", gene.column = 2, unique.features = TRUE)
+```
+
+## Creating Seurat Objects
+```{r pressure, echo=FALSE, include=FALSE}
+cds.h9.1 <- CreateSeuratObject(counts = htsc.h9.data.1, project = "hTSC.H9", min.cells = 3, min.features = 100)
+cds.ccr7.1 <- CreateSeuratObject(counts = htsc.ccr7.data.1, project = "hTSC.CCR7_KO", min.cells = 3, min.features = 100)
+```
+
+## Analyzing features of seurat objects
+
+```{r, echo=FALSE}
+dim(cds.h9.1$RNA@data)
+dim(cds.ccr7.1$RNA@data)
+```
+
+## Extracting row names
+
+```{r, echo=FALSE, include=FALSE}
+h9.genes.1 <- rownames(cds.h9.1)
+ccr7.genes.1 <- rownames(cds.ccr7.1)
+```
+
+## Furthur Filteration
+
+```{r, echo=FALSE, include=FALSE}
+all.genes <- union(ccr7.genes.1, h9.genes.1)
+htsc.ccr7.data.1 <- htsc.ccr7.data.1[rownames(htsc.ccr7.data.1) %in% all.genes, ]
+htsc.h9.data.1 <- htsc.h9.data.1[rownames(htsc.h9.data.1) %in% all.genes, ]
+htsc.ccr7.data.2 <- htsc.ccr7.data.1[,sample(colnames(htsc.ccr7.data.1), 4444)] 
+```
+
+
+# Building New Seurat Objects
+
+```{r, echo=FALSE, include=FALSE}
+cds.h9.1 <- CreateSeuratObject(counts = htsc.h9.data.1, project = "hTSC.H9", min.cells = 0, min.features = 100)
+cds.ccr7.1 <- CreateSeuratObject(counts = htsc.ccr7.data.2, project = "hTSC.CCR7_KO", min.cells = 0, min.features = 100)
+```
+
+
+## Calculating Mitochondrial Genes
+
+```{r, echo=FALSE, include=FALSE}
+cds.ccr7.1[["percent.mito"]] <- PercentageFeatureSet(cds.ccr7.1, pattern = "^MT-")
+cds.h9.1[["percent.mito"]] <- PercentageFeatureSet(cds.h9.1, pattern = "^MT-")
+```
+
+## Violin and Scatter Plots
+
+```{r, echo=FALSE, include=FALSE}
+VlnPlot(cds.h9.1, features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), ncol = 3)
+plot1 <- FeatureScatter(cds.h9.1, feature1 = "nFeature_RNA", feature2 = "percent.mito", pt.size = 0.5)
+plot2 <- FeatureScatter(cds.h9.1, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+
+```
+
+```{r, echo=FALSE, include=FALSE}
+plot1 <- FeatureScatter(cds.ccr7.1, feature1 = "nFeature_RNA", feature2 = "percent.mito", pt.size = 0.5)
+plot2 <- FeatureScatter(cds.ccr7.1, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+```
+
+
+## Subset Data for filteration
+```{r, echo=FALSE, include=FALSE}
+cds.ccr7.1 <- subset(cds.ccr7.1, subset = percent.mito < 30 & percent.mito > 2.5 & nFeature_RNA > 1200)
+cds.h9.1 <- subset(cds.h9.1, subset = nFeature_RNA > 1800 & nFeature_RNA < 8000 & percent.mito < 30)
+```
+
+## Batch Correction and Normalization
+
+```{r, include=FALSE}
+cds.h9.1 <- SCTransform(cds.h9.1, verbose = FALSE, do.correct.umi = TRUE,  return.only.var.genes = FALSE, min_cells = 3)
+all.h9.genes.1 <- rownames(cds.h9.1)
+```
+
+```{r, include=FALSE}
+cds.ccr7.1 <- SCTransform(cds.ccr7.1, verbose = FALSE, do.correct.umi = TRUE,  return.only.var.genes = FALSE, min_cells = 3)
+all.ccr7.genes.1 <- rownames(cds.ccr7.1)
+```
+
+## Finding Common Genes
+
+```{r, echo=FALSE, include=FALSE}
+all.genes <- intersect(all.h9.genes.1, all.ccr7.genes.1)
+```
+
+## Preperation for itegration
+
+```{r, echo=FALSE, include=FALSE}
+set.seed(2702)
+sample.list <- list("CCR7_KO" = cds.ccr7.1, "H9.1" = cds.h9.1)
+features <- SelectIntegrationFeatures(object.list = sample.list, nfeatures = 4000)
+```
+
+### Integration of Datasets with SCT normalization
+
+```{r, echo=FALSE, include=FALSE}
+sample.list <- PrepSCTIntegration(object.list = sample.list, anchor.features = features)
+```
+
+```{r, include=FALSE}
+sample.anchors <- FindIntegrationAnchors(sample.list, anchor.feature = features, k.anchor = 10, normalization.method = "SCT")
+```
+
+```{r, echo=FALSE, include=FALSE}
+cds.hTSC <- IntegrateData(anchorset = sample.anchors, features.to.integrate = all.genes, normalization.method = "SCT")
+DefaultAssay(cds.hTSC)
+all.genes.1 <- rownames(cds.hTSC)
+```
+
+## Principal Component Analysis 
+
+```{r, echo=FALSE, include=FALSE}
+cds.hTSC <- RunPCA(cds.hTSC, npcs = 30, verbose = FALSE, features =VariableFeatures(cds.hTSC))
+ElbowPlot(cds.hTSC, ndims = 30)
+DimPlot(cds.hTSC, reduction = "pca")
+```
+
+## Run Umap
+```{r, include=FALSE}
+cds.hTSC <- FindNeighbors(cds.hTSC, reduction = "pca", dims = 1:15, k.param=25)
+cds.hTSC <- FindClusters(cds.hTSC, resolution = 0.3)
+Idents(cds.hTSC) <- cds.hTSC@meta.data$integrated_snn_res.0.3
+cds.hTSC <- RunUMAP(cds.hTSC, n.components=2, n.neighbors=25, reduction = "pca", dims = 1:15 )
+```
+
+## Visualization Dimension Plot
+
+```{r}
+DimPlot(cds.hTSC, reduction = "umap", split.by = "orig.ident", pt.size=0.8, label = TRUE)
+DimPlot(cds.hTSC, reduction = "umap",pt.size=0.8, cols = c(colors[1], colors[2], colors[12], "grey30","grey60"), split.by = "orig.ident")
+
+placenta.markers  <- c("VGLL1", "TEAD4", "TP63", "EGFR", "CDH1", "ITGB4", "ITGA6", "TFAP2C", "ITGA2" ,"ITGA5","ITGA1", "NOTCH1", "HLA-G","CGA", "CGB1", "CGB3", "CGB5", "CGB7", "CGB8", "ERVW-1", "ERVFRD-1", "GCM1",  "SDC1")
+
+new.markers  <- c("HLA-A", "HLA-B", "TFAP2C", "GATA2", "GATA3", "SOX17", "CDX2", "HAND1","OVOL1", "KRT7", "POU5F1", "SOX2","HNF1B", "CGB1", "LHB","LRP2", "CALM2", "FABP3", "CDKN1C", "GJA5", "NR2F2",  "ZFP42", "DNMT3L", "NR2F2", "CTNNB1", "HMGA1" )
+
+placenta.markers = unique(placenta.markers)
+cds.hTSC@active.assay = "RNA"
+cds.hTSC = NormalizeData(cds.hTSC)
+cds.hTSC@active.assay = "integrated"
+DotPlot(cds.hTSC, features = unique(new.markers), dot.scale = 8, scale.min = 0, scale.max = 100, assay = "RNA") + RotatedAxis()
+DotPlot(cds.hTSC, features = placenta.markers, split.by = "orig.ident", dot.scale = 8, scale.min = 0, scale.max = 100) + RotatedAxis()
+```
+
+
+```{r}
+DotPlot(cds.hTSC, features = placenta.markers, dot.scale = 8, scale.min = 0, scale.max = 100) + RotatedAxis()
+
+
+```
+
+## Renaming Clusters
+
+```{r}
+new.cluster.ids <- c("EVT1", "CTB1", "CTB3", "CTB2", "EVT3", "STB2", "STB3", "CTB4", "EVT2", "STB1")
+new.cluster.ids <- c("CTB1","CTB2","EVT1","STB1","STB2")
+names(new.cluster.ids) <- levels(cds.hTSC)
+cds.hTSC<- RenameIdents(cds.hTSC, new.cluster.ids)
+# Visualization of cluster with new labels 
+DimPlot(cds.hTSC, reduction = "umap", label = TRUE, pt.size = 0.8) 
+```
+
+## Feature Plot of Chemokine Receptors
+```{r}
+FeaturePlot(cds.hTSC, features = c("CCR1", "CCR2", "CCR3", "CCR4", "CCR5", "CCR6", "CCR8","CCR9", "CCR10"), , min.cutoff = "q2")
+FeaturePlot(cds.hTSC, features = c("CXCR1", "CXCR2", "CXCR3", "CXCR4", "CXCR5", "CCR6", "CX3CR1","XCR1", "ACKR1"), min.cutoff = "q9")
+FeaturePlot(cds.hTSC, features = c("ACKR2", "ACKR3", "ACKR4", "CCRL2"), min.cutoff = "q9")
+```
+
+```{r}
+FeaturePlot(cds.hTSC, features = c("CCL1", "CCL2", "CCL3", "CCL4", "CCL5", "CCL7", "CCL8","CCL11", "CCL13"), min.cutoff = "q9")
+FeaturePlot(cds.hTSC, features = c("CCL14", "CCL15", "CCL16", "CCL17", "CCL18", "CCL19", "CCL20","CCL11", "CCL21"), min.cutoff = "q9")
+FeaturePlot(cds.hTSC, features = c("CCL22", "CCL23", "CCL24", "CCL25", "CCL26", "CCL27", "CCL28","CXCL1", "CXCL2"), min.cutoff = "q9")
+FeaturePlot(cds.hTSC, features = c("CXCL3", "CXCL4", "CXCL5", "CXCL6", "CXCL7", "CXCL8", "CXCL9","CXCL10", "CXCL11"), min.cutoff = "q9")
+FeaturePlot(cds.hTSC, features = c("CXCL12", "CXCL13", "CXCL16", "CXCL17", "CX3CL1", "XCL1", "XCL2"), min.cutoff = "q9")
+```
+
+```{r}
+chemor.markers  <- c("CCR1", "CCR2", "CCR3", "CCR4", "CCR5", "CCR6", "CCR8","CCR9", "CCR10","CXCR1", "CXCR2", "CXCR3", "CXCR4", "CXCR5", "CXCR6", "CX3CR1","XCR1", "ACKR1", "ACKR2", "ACKR3", "ACKR4", "CCRL2")
+chemor.markers  <- c("CCL1", "CCL2", "CCL3", "CCL4", "CCL5", "CCL7", "CCL8","CCL11", "CCL13", "CCL14", "CCL15", "CCL16", "CCL17", "CCL18", "CCL19", "CCL20", "CCL21", "CCL22", "CCL23", "CCL24", "CCL25", "CCL26", "CCL27", "CCL28","CXCL1", "CXCL2", "CXCL3", "CXCL4", "CXCL5", "CXCL6", "CXCL7", "CXCL8", "CXCL9","CXCL10", "CXCL11", "CXCL12", "CXCL13", "CXCL16", "CXCL17", "CX3CL1", "XCL1", "XCL2")
+
+DotPlot(cds.hTSC, features = chemor.markers, group.by = "orig.ident" , dot.scale = 8, scale.min = 0, scale.max = 100) + RotatedAxis()
+```
+
+## Find Markers By Groups
+
+```{r}
+
+for(i in cluster.ids) {
+  rm(cds.markers)
+  cds.markers <- FindMarkers(cds.hTSC, ident.1 ="hTSC.CCR7_KO", group.by="orig.ident", subset.ident = i, test.use="wilcox",  min.pct = 0.15, logfc.threshold = 0.05)
+  file.name = paste("diff.c11.markers.r0.1.", i, ".xls", sep="")
+  write.table(cds.markers, file=file.name, sep="\t")
+}
+
+```
+
+
+## Find Markers By Clusters
+
+```{r}
+
+cluster.ids <- unique(cds.hTSC@active.ident)
+for(i in cluster.ids) {
+  cds.markers <- FindMarkers(cds.hTSC, ident.1=i, only.pos = TRUE, min.pct = 0.15, logfc.threshold = 0.05)
+  file.name = paste("all.markers.r0.2.", i, ".xls", sep="")
+  write.table(cds.markers, file=file.name, sep="\t")
+}
+
+``` 
+
+
+```{r}
+
+cluster.ids <- unique(cds.hTSC@active.ident)
+for(i in cluster.ids) {
+  cds.markers <- FindMarkers(cds.hTSC, ident.1=i, only.pos = TRUE, min.pct = 0.15, logfc.threshold = 0.05)
+  file.name = paste("all.markers.r0.91202.", i, ".xls", sep="")
+  write.table(cds.markers, file=file.name, sep="\t")
+}
+
+```
+
+
+## Find Conserved Markers
+
+```{r}
+
+
+cluster.ids <- unique(cds.hTSC@active.ident)
+for(i in cluster.ids) {
+  cds.markers <- FindConservedMarkers(cds.hTSC, ident.1 = 0, grouping.var = "orig.ident",min.pct = 0.15, logfc.threshold = 0.05 )
+  file.name = paste("all.markers.r0.91202.", i, ".xls", sep="")
+  write.table(cds.markers, file=file.name, sep="\t")
+}
+```
+
+
+## cds.h9.1 visualization 
+```{r, include = True}
+
+## cds.h9.1 visualization 
+
+cds.h9.1 <- RunPCA(cds.h9.1, npcs = 30, verbose = FALSE, features =VariableFeatures(cds.h9.1))
+cds.h9.1 <- RunUMAP(cds.h9.1, n.components=2, n.neighbors=25, reduction = "pca", dims = 1:15)
+
+cds.h9.1 <- FindNeighbors(cds.h9.1, reduction = "pca", dims = 1:15, k.param=25)
+cds.h9.1 <- FindClusters(cds.h9.1,resolution = 0.6)
+DimPlot(cds.h9.1, reduction = "umap",pt.size=0.8 )
+```
+
+## cds.ccr7.1 visualization 
+
+```{r}
+cds.ccr7.1 <- RunPCA(cds.ccr7.1, npcs = 30, verbose = FALSE, features =VariableFeatures(cds.ccr7.1))
+cds.ccr7.1 <- RunUMAP(cds.ccr7.1, n.components=2, n.neighbors=25, reduction = "pca", dims = 1:15)
+
+cds.ccr7.1 <- FindNeighbors(cds.ccr7.1, reduction = "pca", dims = 1:15, k.param=25)
+cds.ccr7.1 <- FindClusters(cds.ccr7.1,resolution = 0.6)
+DimPlot(cds.ccr7.1, reduction = "umap",pt.size=0.8 )
+
+```
+
+
+## Individual Sample Analysis - Dot Pots, Dimplots etc. 
+
+
+
+```{r, include=FALSE}
+
+## Resolution 0.6
+
+cds.h9.1 <- RunPCA(cds.h9.1, npcs = 30, verbose = FALSE, features =VariableFeatures(cds.h9.1))
+cds.h9.1 <- RunUMAP(cds.h9.1, n.components=2, n.neighbors=25, reduction = "pca", dims = 1:15)
+
+cds.h9.1 <- FindNeighbors(cds.h9.1, reduction = "pca", dims = 1:15, k.param=25)
+cds.h9.1 <- FindClusters(cds.h9.1,resolution = 0.6)
+DimPlot(cds.h9.1, reduction = "umap",pt.size=0.8 )
+
+new.cluster.ids <- c("CTB_1", "EVT_1", "CTB_2", "EVT_2", "CTB_3", "CTB_4","EVT_3", "STB_1" ) # 0.6
+new.cluster.ids <- c("CTB_1", "CTB_2", "CTB_3", "EVT_1","CTB_4","EVT_2", "CTB_5", "EVT_3", "STB_1" ) # 0.7
+new.cluster.ids <- c("CTB_1", "CTB_2", "CTB_3", "EVT_1","EVT_2", "CTB_4", "CTB_5", "EVT_3", "STB_1") # 0.8
+names(new.cluster.ids) <- levels(cds.h9.1)
+cds.h9.1<- RenameIdents(cds.h9.1, new.cluster.ids)
+
+DotPlot(cds.h9.1, features = pr, cols=c("grey90", colors[11]), dot.scale = 8, scale.min = 0, scale.max = 100) + RotatedAxis()+ labs(title = "Dot Plot of Sample CCR7 Knock Out at Resolution 0.6") + ylab("Cluster Identities") + xlab("Genes")
+
+## Resolution 0.6
+
+cds.ccr7.1 <- RunPCA(cds.ccr7.1, npcs = 30, verbose = FALSE, features =VariableFeatures(cds.ccr7.1))
+cds.ccr7.1 <- RunUMAP(cds.ccr7.1, n.components=2, n.neighbors=25, reduction = "pca", dims = 1:15)
+
+cds.ccr7.1 <- FindNeighbors(cds.ccr7.1, reduction = "pca", dims = 1:15, k.param=25)
+cds.ccr7.1 <- FindClusters(cds.ccr7.1,resolution = 0.6)
+new.cluster.ids <- c("CTB_1","CTB_2", "EVT_1", "EVT_2", "CTB_3", "CTB_4", "STB_1", "EVT_2", "STB_2") # 0.8
+new.cluster.ids <- c("EVT_1", "CTB_1", "CTB_2", "CTB_3", "CTB_4", "STB_1", "EVT_2", "STB_2" ) # 0.6
+names(new.cluster.ids) <- levels(cds.ccr7.1)
+cds.ccr7.1<- RenameIdents(cds.ccr7.1, new.cluster.ids)
+
+
+
+DotPlot(cds.ccr7.1, features = pr, cols=c("grey90", colors[11]), dot.scale = 8, scale.min = 0, scale.max = 100) + RotatedAxis() 
+
+
+```
+
+
+## Trajectory Analysis in scanpy
+
+```{r}
+
+convertFormat(cds.hTSC, from="seurat", to="anndata",outFile='cdryyes06.h5ad')
+
+```
+
+
+## Trajectory analysis in pseudotime in monocle 
+
+
+```{r}
+
+pdf("updated_trophoblast_umap.pdf", height = 5, width = 7)
+DimPlot(cds.hTSC, reduction = "umap", split.by = "orig.ident", pt.size=0.8, label = TRUE,cols = c(colors[1], colors[2], colors[12], "grey30","grey60"))
+dev.off()
+
+DimPlot(cds.hTSC, reduction = "umap",pt.size=0.8, cols = c(colors[1], colors[2], colors[12], "grey30","grey60"), split.by = "orig.ident")
+
+
+data = SplitObject(cds.hTSC, split.by = "orig.ident")
+
+as = FeaturePlot(data$hTSC.H9, features = "CGA")
+
+View(as$data)
+
+table(cds.hTSC@active.ident, cds.hTSC@meta.data$orig.ident)
+
+al  = subset(cds.hTSC, subset = CGA < 2, idents = "2", invert = T)
+dim(al)
+
+DimPlot(al, reduction = "umap",pt.size=0.8, cols = c(colors[1], colors[2], colors[12], "grey30","grey60"), split.by = "orig.ident")
+
+table(al@active.ident, al@meta.data$orig.ident)
+
+?DimPlot
+
+
+as = as$data
+
+ap = as[as$ident == '2',]
+af = ap[ap$CGA > 3.5,]
+
+View(ap)
+
+dim(af)
+
+ap$CGA = as.numeric(ap$CGA)
+
+DimPlot(cds.hTSC, reduction = "umap",pt.size=0.8, cells.highlight = rownames(af))
+
+cds.hTSC@active.assay
+
+cluster.ids <- unique(cds.hTSC@active.ident)
+for(i in cluster.ids) {
+  cds.markers <- FindMarkers(cds.hTSC, ident.1=i, only.pos = TRUE, min.pct = 0.15, logfc.threshold = 0.05)
+  file.name = paste("all.markers.r0.2.", i, ".xls", sep="")
+  write.table(cds.markers, file=file.name, sep="\t")
+}
+
+for(i in cluster.ids) {
+  rm(cds.markers)
+  cds.markers <- FindMarkers(cds.hTSC, ident.1 ="hTSC.CCR7_KO", group.by="orig.ident", subset.ident = i, test.use="wilcox",  min.pct = 0.15, logfc.threshold = 0.05)
+  file.name = paste("diff.c11.markers.r0.1.", i, ".xls", sep="")
+  write.table(cds.markers, file=file.name, sep="\t")
+}
+
+average = AverageExpression(cds.hTSC, group.by = "ident", add.ident = "orig.ident", assays = "RNA")
+write.csv(average$RNA, "average_expression.csv")
+View(average$RNA)
